@@ -1,0 +1,99 @@
+# Parameter values will be passed from the main/parent yaml template.
+parameters:
+  environment: 'Development'
+  environmentDisplayName: 'Dev'
+  backendServiceArm: 'serviceconnection'
+  backendAzureRmResourceGroupName: 'resourcegroup'
+  backendAzureRmStorageAccountName: 'azstorageaccount'
+  backendAzureRmContainerName: 'azcontainer'
+  backendAzureRmKey: 'tfstate'
+  backendKeyVaultName: 'keyvaultname'
+  tfWorkingDirectory: 'terraform/'
+  anyTfChanges: false
+  dependsOn: []
+
+stages:
+
+- stage: ${{ parameters.environment }}
+  displayName: Deploy INFRA to ${{ parameters.environmentDisplayName }}
+  dependsOn: ${{ parameters.dependsOn  }}
+  jobs:
+  - job: Terraform_Plan
+    variables:
+      - group: terraform_weather_api
+    displayName: Terraform Init, Plan & Apply
+    pool:
+      vmImage: Ubuntu-latest
+    
+    steps:
+
+    - task: AzureKeyVault@2
+      inputs:
+        connectedServiceName: ${{ parameters.backendServiceArm }}
+        keyVaultName: ${{ parameters.backendKeyVaultName }}
+        secretsFilter: '*'
+        runAsPreJob: true 
+
+
+    - task: TerraformInstaller@0
+      displayName: install Terraform v1.1.3
+      inputs:
+        terraformVersion: '1.1.3'
+
+    - bash: |
+        terraform init \
+          -backend-config="resource_group_name=$TF_STATE_RESOURCE_GROUP_NAME" \
+          -backend-config="container_name=$TF_STATE_BLOB_CONTAINER_NAME" \
+          -backend-config="storage_account_name=$TF_STATE_BLOB_ACCOUNT_NAME" \
+          -backend-config="key=$TF_STATE_BLOB_FILE" \
+          -backend-config="access_key=$TF_STATE_BLOB_ACCESS_KEY"
+      displayName: Terraform Init
+      workingDirectory: '${{ parameters.tfWorkingDirectory }}'
+      env:
+        TF_STATE_BLOB_ACCOUNT_NAME:   ${{ parameters.backendAzureRmStorageAccountName }}
+        TF_STATE_BLOB_CONTAINER_NAME: ${{ parameters.backendAzureRmContainerName }}
+        TF_STATE_BLOB_FILE:           ${{ parameters.backendAzureRmKey }}
+        TF_STATE_BLOB_ACCESS_KEY:     $(tf-arm-access-key)
+        TF_STATE_RESOURCE_GROUP_NAME: ${{ parameters.backendAzureRmResourceGroupName }}
+
+    - bash: terraform plan -var environment=$TF_ENVIRONMENT -out=$TF_STATE_BLOB_FILE
+      displayName: Terraform plan
+      workingDirectory: '${{ parameters.tfWorkingDirectory }}'
+      env:
+        ARM_SUBSCRIPTION_ID:  $(az-sub-id)
+        ARM_CLIENT_ID:        $(az-client-id)
+        ARM_CLIENT_SECRET:    $(az-client-secret)
+        ARM_TENANT_ID:        $(az-tenant-id)
+        TF_ENVIRONMENT:       ${{ parameters.environment }}
+        TF_STATE_BLOB_FILE:   ${{ parameters.backendAzureRmKey }}
+
+    - task: PowerShell@2
+      displayName: detect any terraform change in the plan
+      inputs:
+        workingDirectory: '${{ parameters.tfWorkingDirectory }}'
+        targetType: 'inline'
+        script: |
+          $plan = $(terraform show -json ${{ parameters.backendAzureRmKey }} | ConvertFrom-Json)
+          $actions = $plan.resource_changes.change.actions
+          Write-Host "Terraform actions : $actions"
+          if (($actions -contains 'create') -or ($actions -contains 'delete') -or ($actions -contains 'update'))
+          {
+            Write-Host "Terraform will perform the following actions : $actions"
+            Write-Host "##vso[task.setvariable variable=anyTfChanges;]true"
+          }
+          else
+          {
+            Write-Host "There is no change detected in Terraform tfplan file"
+          }
+
+
+    - bash: terraform apply -auto-approve $TF_STATE_BLOB_FILE
+      displayName: Terraform apply ${{ parameters.backendAzureRmKey }}
+      workingDirectory: '${{ parameters.tfWorkingDirectory }}'
+      condition: eq(variables.anyTfChanges, true)
+      env:
+        ARM_SUBSCRIPTION_ID:  $(az-sub-id)
+        ARM_CLIENT_ID:        $(az-client-id)
+        ARM_CLIENT_SECRET:    $(az-client-secret)
+        ARM_TENANT_ID:        $(az-tenant-id)
+        TF_STATE_BLOB_FILE:   ${{ parameters.backendAzureRmKey }}

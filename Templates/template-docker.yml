@@ -1,0 +1,90 @@
+parameters:
+  environment: ''
+  environmentDisplayName: ''
+  backendServiceArm: ''
+  acrLogin: ''
+  acrId: ''
+  testServiceConn: ''
+  containerRegistryName: ''
+  infraEnvironment: ''
+  dependsOn: []
+
+stages:
+- stage: ${{ parameters.environment }}
+  displayName: ${{ parameters.environmentDisplayName }}
+  dependsOn: ${{ parameters.dependsOn  }}
+  jobs:
+  - job: ${{ parameters.environment }}
+    continueOnError: false
+    pool:
+      vmImage: Ubuntu-latest
+
+    steps:
+
+    # Download dotnet artifact
+    - task: DownloadBuildArtifacts@1
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'drop'
+        downloadPath: '$(System.DefaultWorkingDirectory)'
+
+    - task: AzureCLI@2
+      displayName: Retrieve ACR instance name
+      inputs:
+        azureSubscription: '${{ parameters.backendServiceArm }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          foreach ($name in (az acr list | ConvertFrom-Json).name){
+            if ( $name -like '*${{ parameters.infraEnvironment }}*' )
+            {
+              Write-Host "##vso[task.setvariable variable=containerRegistryName]$name"
+            }
+          }
+
+      # Get ACR loginServer and the ID
+    - task: AzureCLI@2
+      displayName: Retrieve ACR loginServer && ID
+      inputs:
+        azureSubscription: '${{ parameters.backendServiceArm }}'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          while true;
+          do
+              LOGIN=$(az acr show -n $(containerRegistryName) --query loginServer | tr -d '"')
+              ID=$(az acr show -n $(containerRegistryName) --query id | tr -d '"')
+              if [ -z "$LOGIN" ] || [ -z "$ID" ]; then
+                  echo "Trying to get azure credentials"
+                  sleep 10
+              else
+                  echo "Credentials successfully received"
+                  break
+              fi
+          done
+          echo "##vso[task.setvariable variable=acrLogin]$LOGIN"
+          echo "##vso[task.setvariable variable=acrId]$ID"
+
+
+    # Build a Container image
+    - task: DockerCompose@0
+      displayName: Docker compose build
+      inputs:
+        containerregistrytype: 'Azure Container Registry'
+        azureSubscription: '${{ parameters.backendServiceArm }}'
+        azureContainerRegistry: '{"loginServer":"$(acrLogin)", "id" : "$(acrId)"}'
+        dockerComposeFile: '**/docker-compose.yml'
+        action: 'Build services'
+        additionalImageTags: $(Build.BuildId)
+
+    # Push container image to ACR
+    - task: DockerCompose@0
+      displayName: Docker compose push
+      inputs:
+        containerregistrytype: 'Azure Container Registry'
+        azureSubscription: '${{ parameters.backendServiceArm }}'
+        azureContainerRegistry: '{"loginServer":"$(acrLogin)", "id" : "$(acrId)"}'
+        dockerComposeFile: '**/docker-compose.yml'
+        action: 'Push services'
+        additionalImageTags: $(Build.BuildId)

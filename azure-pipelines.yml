@@ -1,0 +1,102 @@
+parameters:
+  - name: buildConfiguration
+    default: 'Release'
+  - name: BuildPlatform
+    default: 'AnyCPU'
+  - name: VM
+    default: 'Ubuntu-latest'
+  - name: acrWebAppRepo
+    default: 'devopspractises_web'
+  - name: backendServiceArm
+    default: 'svcn_lia_devops'
+  - name: backendAzureRmResourceGroupName
+    default: 'rg_lia_devops'
+  - name: backendAzureRmStorageAccountName
+    default: 'tfstacc0001'
+  - name: backendAzureRmContainerName
+    default: 'tfstcontainer0001'
+  - name: backendAzureRmKey
+    default: 'tfstcontainer0001'
+  - name: location
+    default: 'northeurope'
+  # Environment variables
+  - name: environment
+    default: ''
+  - name: tfBackendEnvironment
+    default: 'tf_backend'
+  - name: buildEnvironment
+    default: 'build'
+  - name: imageEnvironment
+    default: 'image'
+  - name: devEnvironment
+    default: 'dev'
+  - name: testEnvironment
+    default: 'test'
+  - name: qaEnvironment
+    default: 'QA'
+  - name: prodEnvironment
+    default: 'prod'
+  - name: deployEnvironment
+    default: 'deploy'
+  # Directories
+  - name: dotnetWorkingDirectory
+    default: ''
+  # Approver environment
+  - name: approver
+    default: 'web-app'
+  # Key Vault
+  - name: backendKeyVaultName 
+    default: 'kv-lia-devops-primary'
+
+stages:
+- template: Templates/template-dotnet.yml
+  parameters:
+    environment: ${{ parameters.buildEnvironment }}
+    environmentDisplayName: Install, Build & Test .NET
+    buildConfiguration: ${{ parameters.buildConfiguration }}
+    dotnetWorkingDirectory: ${{ parameters.dotnetWorkingDirectory }}
+    dependsOn: []
+
+- template: Templates/template-terraform-backend.yml
+  parameters:
+    environment: ${{ parameters.tfBackendEnvironment }}
+    environmentDisplayName: Create TF Backend
+    backendServiceArm: ${{ parameters.backendServiceArm }}
+    backendAzureRmResourceGroupName: ${{ parameters.backendAzureRmResourceGroupName }}
+    backendAzureRmStorageAccountName: ${{ parameters.backendAzureRmStorageAccountName }}
+    backendAzureRmContainerName: ${{ parameters.backendAzureRmContainerName }}
+    workingDirectory: $(tfWorkingDirectory)
+    dependsOn: ['${{ parameters.buildEnvironment }}']
+
+
+- template: Templates/template-terraform-stages.yml
+  parameters:
+    environment: ${{ parameters.environment }}
+    environmentDisplayName: ${{ parameters.environment }}
+    backendServiceArm: ${{ parameters.backendServiceArm }}
+    backendAzureRmResourceGroupName: ${{ parameters.backendAzureRmResourceGroupName }}
+    backendAzureRmStorageAccountName: ${{ parameters.backendAzureRmStorageAccountName }}
+    backendAzureRmContainerName: ${{ parameters.backendAzureRmContainerName }}
+    backendKeyVaultName: ${{ parameters.backendKeyVaultName }}
+    backendAzureRmKey: ${{ parameters.environment }}.${{ parameters.backendAzureRmContainerName }}
+    dependsOn: ['${{ parameters.tfBackendEnvironment }}']
+
+
+- template: Templates/template-docker.yml
+  parameters:
+    environment: ${{ parameters.imageEnvironment }}
+    environmentDisplayName: Create an image an push to ACR
+    backendServiceArm: '${{ parameters.backendServiceArm }}'
+    infraEnvironment: '${{ parameters.environment }}'
+    dependsOn: ['${{ parameters.environment }}']
+
+- template: Templates/template-deploy.yml
+  parameters:
+    environment: ${{ parameters.deployEnvironment }}
+    environmentDisplayName: Deploy API
+    backendServiceArm: '${{ parameters.backendServiceArm }}'
+    webContainerReg: 'creways${{ parameters.environment }}ne0001.azurecr.io'
+    acrWebAppRepo: ${{ parameters.acrWebAppRepo }}
+    approver: ${{ parameters.approver }}
+    webAppName: 'aser-eways-${{ parameters.environment }}-ne-0001'
+    dependsOn: ['${{ parameters.imageEnvironment }}']

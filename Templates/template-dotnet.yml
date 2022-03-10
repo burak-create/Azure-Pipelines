@@ -1,0 +1,73 @@
+parameters:
+  environment: 'dev'
+  buildConfiguration: ''
+  dotnetWorkingDirectory: ''
+  dependsOn: []
+
+stages:
+# Build Stage
+- stage: ${{ parameters.environment }}
+  displayName: ${{ parameters.environmentDisplayName }}
+  dependsOn: ${{ parameters.dependsOn  }}
+  jobs:
+  - job: ${{ parameters.environment }}
+    continueOnError: false
+    pool:
+      vmImage: Ubuntu-latest
+
+    steps:
+    # Install Nuget tool
+    - task: NuGetToolInstaller@0
+      displayName: Install NuGet
+      inputs:
+        versionSpec: 
+        checkLatest: true
+
+    # Install .NET version 6.0.x
+    - task: UseDotNet@2
+      displayName: 'Use .NET Core sdk'
+      inputs:
+        packageType: sdk
+        version: 6.0.x
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    # Restore dependencies
+    - bash: dotnet restore ${{ parameters.dotnetWorkingDirectory }}
+      displayName: Dotnet restore **/*.csproj
+
+    # Build app
+    - bash: dotnet build ${{ parameters.dotnetWorkingDirectory }} --configuration ${{ parameters.buildConfiguration }}
+      displayName: Dotnet build
+
+    # Run unit tests
+    - task: DotNetCoreCLI@2
+      displayName: Unit test
+      inputs:
+        command: test
+        projects: '${{ parameters.dotnetWorkingDirectory }}/*UnitTests/*.csproj'
+        arguments: '--collect "XPlat Code Coverage" --settings src\code_coverage.runsettings'
+        publishTestResults: true
+        
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish code coverage'
+      inputs:
+        codeCoverageTool: cobertura
+        summaryFileLocation: '$(Agent.TempDirectory)\**\coverage.cobertura.xml'
+        failIfCoverageEmpty: false
+
+    # Publish the app
+    - bash: dotnet publish --configuration ${{ parameters.buildConfiguration }} --output $(System.DefaultWorkingDirectory)/app
+      displayName: Dotnet build
+      workingDirectory: '${{ parameters.dotnetWorkingDirectory }}'
+
+    # Copy published dotnet file to artifact
+    - bash: mv app $(build.ArtifactStagingDirectory)/app
+      displayName: Copy files to artifact
+
+    # Publish artifact drop/app
+    - task: PublishBuildArtifacts@1
+      displayName: Publish artifact to drop/app
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'

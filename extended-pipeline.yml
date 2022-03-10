@@ -1,0 +1,9 @@
+trigger:
+  - master
+
+extends:
+  template: azure-pipelines.yml
+  parameters:
+    environment: 'Prod'
+    backendServiceArm: 'svcn_lia_devops'
+    dotnetWorkingDirectory: 'DummyProject'

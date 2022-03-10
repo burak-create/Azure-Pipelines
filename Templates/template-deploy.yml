@@ -1,0 +1,68 @@
+parameters:
+  environment: 'deploy'
+  environmentDisplayName: 'deploy'
+  backendServiceArm: ''
+  acrWebAppRepo: ''
+  webAppName: ''
+  webContainerReg: ''
+  appService: ''
+  approver: 'web-app'
+  continueToDeploy: false
+  dependsOn: []
+
+stages:
+# Build Stage
+- stage: ${{ parameters.environment }}
+  displayName: ${{ parameters.environmentDisplayName }}
+  dependsOn: ['${{ parameters.dependsOn  }}']
+  jobs:
+  - deployment: Deploy
+    displayName:
+    continueOnError: false
+    pool:
+      vmImage: Ubuntu-latest
+    # Defining environment for approvals
+    environment: ${{ parameters.approver }}
+    # strategies runOnce, rolling, canary
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          # Checking with the while loop if the App Service is running
+          - task: AzureCLI@2
+            displayName: Check if the App Service is up and running
+            inputs:
+              azureSubscription: '${{ parameters.backendServiceArm }}'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                COUNTER=0
+                HOSTNAME="${{ parameters.webAppName }}.azurewebsites.net"
+                while true;
+                do
+                  OUTPUT=$(az webapp list --query "[?defaultHostName=='$HOSTNAME'].state" | tr -d '"' | tr -d '[]')
+                  if [[ $OUTPUT -eq 'Running' ]]; then
+                    echo "$HOSTNAME is Running and credentials are successfully received"
+                    echo "##vso[task.setvariable variable=continueToDeploy;]true"
+                    break
+                  else
+                    COUNTER=$[COUNTER + 1]
+                    echo "Web App is not running. Lets try again!.."
+                    sleep 5
+                    if [[ $COUNTER -eq 10 ]]; then
+                        break
+                    fi
+                  fi
+                done
+
+          # Deploy the api
+          - task: AzureRmWebAppDeployment@4
+            inputs:
+              conditions: eq(variables.continueToDeploy, true)
+              ConnectionType: 'AzureRM'
+              azureSubscription: '${{ parameters.backendServiceArm }}'
+              appType: 'webAppContainer'
+              WebAppName: '${{ parameters.webAppName }}'
+              DockerNamespace: '${{ parameters.webContainerReg }}'
+              DockerRepository: '${{ parameters.acrWebAppRepo }}'
+              DockerImageTag: '$(Build.BuildId)'
