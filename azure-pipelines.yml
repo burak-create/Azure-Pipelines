@@ -6,13 +6,13 @@ parameters:
   - name: VM
     default: 'Ubuntu-latest'
   - name: acrWebAppRepo
-    default: 'devopspractises_web'
+    default: 'azure_pipelines'
   - name: backendServiceArm
-    default: 'svcn_lia_devops'
+    default: 'svcn_some_service_connection'
   - name: backendAzureRmResourceGroupName
-    default: 'rg_lia_devops'
+    default: 'rg_some_resource_grp'
   - name: backendAzureRmStorageAccountName
-    default: 'tfstacc0001'
+    default: 'tfstaccount0001'
   - name: backendAzureRmContainerName
     default: 'tfstcontainer0001'
   - name: backendAzureRmKey
@@ -46,7 +46,7 @@ parameters:
     default: 'web-app'
   # Key Vault
   - name: backendKeyVaultName 
-    default: 'kv-lia-devops-primary'
+    default: 'kv-some-key-primary'
 
 stages:
 - template: Templates/template-dotnet.yml
