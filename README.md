@@ -32,6 +32,6 @@ There is 6 template files and 5 stages on this pipeline.
 
 Sample view of complete pipeline;
 ![Approval](./Screenshots/approval.png)
-![Approval1](/Screenshots/approval1.png =300x)
+![Approval1](/Screenshots/approval1.png)
 ![Pipeline Wiew](./Screenshots/pipeline-view.png)
 
